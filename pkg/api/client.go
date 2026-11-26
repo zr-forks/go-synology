@@ -241,9 +241,19 @@ func (c *Client) Login(ctx context.Context, options LoginOptions) (*LoginRespons
 		}
 	}
 
+	// Clamp the login method version to what the NAS actually supports.
+	// Older DSM releases (e.g. 6.2 on a DS412+) top out at SYNO.API.Auth v6,
+	// and requesting v7 fails with error 102 (API does not exist).
+	loginMethod := Login
+	if info, infoErr := c.GetApiInfo(ctx); infoErr == nil {
+		if d, ok := (*info)[API_Auth]; ok && d.MaxVersion > 0 && loginMethod.Version > d.MaxVersion {
+			loginMethod.Version = d.MaxVersion
+		}
+	}
+
 	// PLAT-499: POST form body (not GET query) so passwd is not in the URL.
 	// DSM accepts login via application/x-www-form-urlencoded on entry.cgi.
-	resp, err := postEntry[LoginResponse](c, ctx, &req, Login)
+	resp, err := postEntry[LoginResponse](c, ctx, &req, loginMethod)
 	if err != nil {
 		if terr, ok := err.(PermissionDeniedError); ok {
 			tmpToken, err := terr.GetToken()
@@ -255,7 +265,7 @@ func (c *Client) Login(ctx context.Context, options LoginOptions) (*LoginRespons
 				return nil, multierror.Append(err, errors.New("unable to generate otp code"))
 			}
 			req.Password = tmpToken
-			resp, err = postEntry[LoginResponse](c, ctx, &req, Login)
+			resp, err = postEntry[LoginResponse](c, ctx, &req, loginMethod)
 			if err != nil {
 				return nil, multierror.Append(
 					err,
