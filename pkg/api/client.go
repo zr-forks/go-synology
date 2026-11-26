@@ -28,6 +28,8 @@ import (
 )
 
 const (
+	// API_BASE is the default CGI endpoint; DSM 6.x per-API paths are
+	// discovered at login (see DiscoverApiPaths).
 	API_BASE = "/webapi/entry.cgi"
 )
 
