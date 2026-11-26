@@ -58,6 +58,8 @@ jobs:
           cache: true
       - run: go mod download
 
+      # Live-NAS tests self-skip when SYNOLOGY_HOST is empty, so this runs
+      # the full unit suite on forks without secrets too.
       - name: Client unit tests
         run: |
           go test -v ./pkg/...
