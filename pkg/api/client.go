@@ -43,6 +43,12 @@ type Client struct {
 	username string
 	password string
 
+	// apiInfo is the live API catalog fetched from the NAS by
+	// DiscoverApiPaths. DSM 6.x routes each API family to its own CGI path
+	// (auth.cgi, query.cgi, ...); DSM 7 routes everything through entry.cgi.
+	// nil means "use entry.cgi and spec versions for everything".
+	apiInfo map[string]InfoData
+
 	// once sync.Once
 }
 
@@ -107,6 +113,67 @@ func (c *Client) Password() string {
 // BaseUrl implements api.Client.
 func (c *Client) BaseUrl() *url.URL {
 	return c.BaseURL
+}
+
+// apiURL returns the request URL for the given API name, honoring the
+// per-API CGI path discovered from SYNO.API.Info. Falls back to the base
+// URL (entry.cgi) when no path is known, which matches DSM 7 behavior.
+func (c *Client) apiURL(api string) *url.URL {
+	u := new(url.URL)
+	*u = *c.BaseUrl()
+	if d, ok := c.apiInfo[api]; ok && d.Path != "" {
+		u.Path = "/webapi/" + d.Path
+	}
+	return u
+}
+
+// resolveURL routes a request for the given API through the per-API CGI path
+// when the client supports path discovery, falling back to the base URL.
+func resolveURL(c Api, api string) *url.URL {
+	if cc, ok := c.(interface{ apiURL(string) *url.URL }); ok {
+		return cc.apiURL(api)
+	}
+	u := new(url.URL)
+	*u = *c.BaseUrl()
+	return u
+}
+
+// DiscoverApiPaths queries SYNO.API.Info on query.cgi (which serves this API
+// on every DSM version, unauthenticated) and records the CGI path of every
+// API the NAS exposes.
+func (c *Client) DiscoverApiPaths(ctx context.Context) error {
+	u := new(url.URL)
+	*u = *c.BaseUrl()
+	u.Path = "/webapi/query.cgi"
+	q := u.Query()
+	q.Set("api", "SYNO.API.Info")
+	q.Set("version", "1")
+	q.Set("method", "query")
+	q.Set("query", "all")
+	u.RawQuery = q.Encode()
+
+	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Success bool                `json:"success"`
+		Data    map[string]InfoData `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return err
+	}
+	if !body.Success {
+		return errors.New("SYNO.API.Info query failed")
+	}
+	c.apiInfo = body.Data
+	return nil
 }
 
 // Client implements api.Client.
@@ -241,12 +308,13 @@ func (c *Client) Login(ctx context.Context, options LoginOptions) (*LoginRespons
 		}
 	}
 
-	// Clamp the login method version to what the NAS actually supports.
+	// Discover per-API CGI paths (required on DSM 6.x, harmless on DSM 7)
+	// and clamp the login method version to what the NAS actually supports.
 	// Older DSM releases (e.g. 6.2 on a DS412+) top out at SYNO.API.Auth v6,
 	// and requesting v7 fails with error 102 (API does not exist).
 	loginMethod := Login
-	if info, infoErr := c.GetApiInfo(ctx); infoErr == nil {
-		if d, ok := (*info)[API_Auth]; ok && d.MaxVersion > 0 && loginMethod.Version > d.MaxVersion {
+	if infoErr := c.DiscoverApiPaths(ctx); infoErr == nil {
+		if d, ok := c.apiInfo[API_Auth]; ok && d.MaxVersion > 0 && loginMethod.Version > d.MaxVersion {
 			loginMethod.Version = d.MaxVersion
 		}
 	}
@@ -517,12 +585,10 @@ func postEntry[TResp Response, TReq Request](
 		return nil, err
 	}
 
-	u2 := c.BaseUrl()
-	if u2 == nil {
+	if c.BaseUrl() == nil {
 		return nil, errors.New("base url is nil")
 	}
-	u := new(url.URL)
-	*u = *u2
+	u := resolveURL(c, method.API)
 	u.RawQuery = ""
 
 	// Only set a timeout if one isn't already set
@@ -561,13 +627,11 @@ func GetQuery[TResp any](c Api, ctx context.Context, r any, method Method) (*TRe
 		return nil, err
 	}
 
-	url := c.BaseUrl()
-
-	qu := maps.Clone(url.Query())
+	qu := maps.Clone(c.BaseUrl().Query())
 	maps.Copy(aq, qu)
 	maps.Copy(aq, dq)
 
-	u := c.BaseUrl()
+	u := resolveURL(c, method.API)
 
 	u.RawQuery = aq.Encode()
 
@@ -602,17 +666,15 @@ func Get[TResp Response, TReq Request](
 		return nil, err
 	}
 
-	u2 := c.BaseUrl()
+	if c.BaseUrl() == nil {
+		return nil, errors.New("base url is nil")
+	}
 
-	qu := maps.Clone(u2.Query())
+	qu := maps.Clone(c.BaseUrl().Query())
 	maps.Copy(qu, aq)
 	maps.Copy(qu, dq)
 
-	if u2 == nil {
-		return nil, errors.New("base url is nil")
-	}
-	u := new(url.URL)
-	*u = *u2
+	u := resolveURL(c, method.API)
 
 	u.RawQuery = qu.Encode()
 
