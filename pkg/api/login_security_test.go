@@ -16,6 +16,18 @@ func TestLogin_PasswordNotInURL(t *testing.T) {
 	const secret = "super-secret-password-not-for-url"
 	var sawURL, sawBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/webapi/query.cgi" {
+			// API catalog discovery; unrelated to the login request itself.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data": map[string]any{
+					"SYNO.API.Auth": map[string]any{
+						"path": "auth.cgi", "minVersion": 1, "maxVersion": 7,
+					},
+				},
+			})
+			return
+		}
 		sawURL = r.URL.String()
 		b, _ := io.ReadAll(r.Body)
 		sawBody = string(b)
