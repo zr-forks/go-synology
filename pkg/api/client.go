@@ -254,6 +254,15 @@ func (c *Client) Login(ctx context.Context, options LoginOptions) (*LoginRespons
 	// PLAT-499: POST form body (not GET query) so passwd is not in the URL.
 	// DSM accepts login via application/x-www-form-urlencoded on entry.cgi.
 	resp, err := postEntry[LoginResponse](c, ctx, &req, loginMethod)
+	if err != nil && loginMethod.Version > 6 {
+		// Some DSM releases do not expose SYNO.API.Info on entry.cgi, so the
+		// clamp above may not have happened. Error 102 means the requested
+		// API version does not exist; retry with v6, the DSM 6.x maximum.
+		if apiErr, ok := err.(ApiError); ok && apiErr.Code == 102 {
+			loginMethod.Version = 6
+			resp, err = postEntry[LoginResponse](c, ctx, &req, loginMethod)
+		}
+	}
 	if err != nil {
 		if terr, ok := err.(PermissionDeniedError); ok {
 			tmpToken, err := terr.GetToken()
