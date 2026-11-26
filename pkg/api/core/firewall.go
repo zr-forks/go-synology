@@ -73,7 +73,7 @@ type FirewallAdapterRules struct {
 // FirewallProfile is the full profile document.
 // DSM stores adapters as top-level keys alongside "name" (e.g. "global", "eth0").
 type FirewallProfile struct {
-	Name     string                           `json:"name"`
+	Name     string                          `json:"name"`
 	Adapters map[string]FirewallAdapterRules `json:"-"`
 }
 

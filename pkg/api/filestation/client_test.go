@@ -107,6 +107,9 @@ func TestMain(m *testing.M) {
 }
 
 func newClient(t *testing.T) Api {
+	if os.Getenv("SYNOLOGY_HOST") == "" {
+		t.Skip("SYNOLOGY_HOST not set; skipping live-NAS test")
+	}
 	c, err := api.New(api.Options{
 		Host: os.Getenv("SYNOLOGY_HOST"),
 	})

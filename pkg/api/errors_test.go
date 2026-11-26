@@ -111,9 +111,14 @@ func TestApiError_UnmarshalJSON(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:      "Invalid errors structure (missing code field)",
-			jsonData:  `{"code": 101, "errors": [{"field1": "error1"}]}`,
-			wantError: true,
+			// Decode is deliberately lenient: an ErrorFields entry without a
+			// code keeps Code=0 rather than failing the whole response, so
+			// the outer error code still reaches the caller.
+			name:              "errors entry with missing code field decodes leniently",
+			jsonData:          `{"code": 101, "errors": [{"field1": "error1"}]}`,
+			expectedCode:      101,
+			expectedErrors:    []ErrorFields{{Code: 0, Fields: map[string]any{"field1": "error1"}}},
+			shouldHaveSummary: true,
 		},
 		{
 			// This expectation was inverted deliberately. It required an error,
@@ -169,7 +174,7 @@ func TestApiError_UnmarshalJSON(t *testing.T) {
 				case 103:
 					assert.Equal(t, "The requested method does not exist", apiError.Summary)
 				case 9999:
-					assert.Equal(t, "Unknown error code", apiError.Summary)
+					assert.Equal(t, "Unknown error code 9999", apiError.Summary)
 				}
 			} else {
 				assert.Empty(
@@ -229,7 +234,7 @@ func TestApiError_UnmarshalJSON_WithCode1100Response(t *testing.T) {
 
 	assert.False(t, response.Success)
 	assert.Equal(t, 1100, response.Error.Code)
-	assert.Equal(t, "Unknown error code", response.Error.Summary) // 1100 is not in global errors
+	assert.Equal(t, "Unknown error code 1100", response.Error.Summary) // 1100 is not in global errors
 
 	require.Len(t, response.Error.Errors, 1)
 	errorField := response.Error.Errors[0]

@@ -12,6 +12,9 @@ import (
 )
 
 func newClient(suite *suite.Suite) docker.Api {
+	if os.Getenv("SYNOLOGY_HOST") == "" {
+		suite.T().Skip("SYNOLOGY_HOST not set; skipping live-NAS test")
+	}
 	c, err := api.New(api.Options{
 		Host:       os.Getenv("SYNOLOGY_HOST"),
 		VerifyCert: false,

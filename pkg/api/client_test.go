@@ -48,6 +48,9 @@ func (streamResponse) IsStream() {}
 // }
 
 func TestLogin(t *testing.T) {
+	if os.Getenv("SYNOLOGY_HOST") == "" {
+		t.Skip("SYNOLOGY_HOST not set; skipping live-NAS login test")
+	}
 	c, err := New(Options{
 		Host:       os.Getenv("SYNOLOGY_HOST"),
 		VerifyCert: false,
